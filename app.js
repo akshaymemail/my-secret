@@ -5,8 +5,12 @@ const express = require('express')
 const bodyParser = require('body-parser')
 const ejs = require('ejs')
 const mongoose = require('mongoose')
-var encrypt = require('mongoose-encryption');
-var md5 = require('md5')
+const encrypt = require('mongoose-encryption');
+const md5 = require('md5')
+const bcrypt = require('bcrypt')
+
+//crating bcrypt salt rounds
+const bcryptSalt = 10
 
 // creating express app
 const app = express()
@@ -65,20 +69,24 @@ app.listen(3000, function () {
 
 // posting the register route
 app.post('/register', function (req, res) {
-    // creating the new user in the database
-    new User({
-        email: req.body.username,
-        password: md5(req.body.password) // hashing the password with md5
-    }).save(function (err) {
-        // checking the error
-        if (err) {
-            // there was an error
-            res.send(err);
-        } else {
-            // user was successfully added, redirect to the secret page
-            res.render('secrets')
-        }
+    // generating 10 roundSalt has using bcrypt
+    bcrypt.hash(req.body.password, bcryptSalt, function (err, hash) {
+        // creating a new user
+        new User({
+            email: req.body.username,
+            password: hash // hashing the password with bcrypt
+        }).save(function (err) {
+            // checking the error
+            if (err) {
+                // there was an error
+                res.send(err);
+            } else {
+                // user was successfully added, redirect to the secret page
+                res.render('secrets')
+            }
+        })
     })
+
 })
 
 // posting the login route
@@ -91,16 +99,16 @@ app.post('/login', function (req, res) {
             // there was an error
             console.log(err)
         } else {
-            {
-                // username was successfully found, checking for password
-                if (foundUser.password === md5(req.body.password)) {
-                    // username and password are found, render the secret page
+            // username was successfully found, checking for password
+            bcrypt.compare(req.body.password, foundUser.password, function (err, result) {
+                if (result) {
+                    // user was successfully verified
                     res.render('secrets')
                 } else {
-                    // user not found
+                    // user was not found
                     res.send("Your email or password is wrong")
                 }
-            }
+            })
         }
     })
 
