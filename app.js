@@ -1,3 +1,5 @@
+//requiring dotenv config
+require('dotenv').config()
 // requiring the npm packages
 const express = require('express')
 const bodyParser = require('body-parser')
@@ -37,11 +39,8 @@ const schema = new mongoose.Schema({
     }
 })
 
-// creating secret key
-const secret = 'thisismysecretstring'
-
 // encrypting the password field
-schema.plugin(encrypt, { secret: secret, encryptedFields : ['password'] });
+schema.plugin(encrypt, { secret: process.env.secret, encryptedFields : ['password'] });
 
 // creating the the model
 const User = mongoose.model('User', schema)
