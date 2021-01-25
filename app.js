@@ -1,5 +1,6 @@
 //requiring dotenv config
 require('dotenv').config()
+
 // requiring the npm packages
 const express = require('express')
 const bodyParser = require('body-parser')
@@ -8,6 +9,11 @@ const mongoose = require('mongoose')
 const encrypt = require('mongoose-encryption');
 const md5 = require('md5')
 const bcrypt = require('bcrypt')
+
+// passport.js packages
+const session = require('express-session')
+const passport = require('passport')
+const passportLocalMongoose = require('passport-local-mongoose')
 
 //crating bcrypt salt rounds
 const bcryptSalt = 10
@@ -26,6 +32,17 @@ app.use(bodyParser.urlencoded({
 // setting ejs view engine
 app.set('view engine', 'ejs')
 
+// let app use session
+app.use(session({
+    secret: 'i am secret',
+    resave: false,
+    saveUninitialized: false
+}))
+
+// initialize the session
+app.use(passport.initialize())
+app.use(passport.session())
+mongoose.set('useCreateIndex', true);
 // creating the connection with mongodb
 mongoose.connect('mongodb://localhost:27017/userDB', {
     useNewUrlParser: true,
@@ -34,18 +51,24 @@ mongoose.connect('mongodb://localhost:27017/userDB', {
 
 // creating the schema
 const schema = new mongoose.Schema({
-    email: {
-        type: String,
-        required: true
-    },
-    password: {
-        type: String,
-        required: true
-    }
+    email: String,
+    password: String
 })
+
+//creating the schema plugin
+schema.plugin(passportLocalMongoose)
 
 // creating the the model
 const User = mongoose.model('User', schema)
+
+// usign passport to create strtegy
+passport.use(User.createStrategy())
+
+// creating passport to serialize and deserialize
+passport.serializeUser(User.serializeUser())
+passport.deserializeUser(User.deserializeUser())
+
+
 
 // listening the home router
 app.get('/', function (req, res) {
@@ -62,54 +85,68 @@ app.get('/register', function (req, res) {
     res.render('register')
 })
 
-// spinning the server at port 3000
-app.listen(3000, function () {
-    console.log('Server is running at port 3000')
+// listening the the secret route
+app.get('/secrets', function (req, res) {
+    // checking if the user is authenticated or not
+    if (req.isAuthenticated()) {
+        // user is authenticated
+        res.render('secrets')
+    } else {
+        // user is not authenticated
+        res.redirect('/login')
+    }
 })
 
 // posting the register route
 app.post('/register', function (req, res) {
-    // generating 10 roundSalt has using bcrypt
-    bcrypt.hash(req.body.password, bcryptSalt, function (err, hash) {
-        // creating a new user
-        new User({
-            email: req.body.username,
-            password: hash // hashing the password with bcrypt
-        }).save(function (err) {
-            // checking the error
-            if (err) {
-                // there was an error
-                res.send(err);
-            } else {
-                // user was successfully added, redirect to the secret page
-                res.render('secrets')
-            }
-        })
+    // registring the user
+    User.register({
+        username: req.body.username
+    }, req.body.password, function (err, user) {
+        if (err) {
+            // there was some err register again
+            console.log(err)
+            res.redirect('/register')
+        } else {
+            // user was registered new authenticating
+            passport.authenticate('local')(req, res, function () {
+                // user was authenticated, redirecting the secrets route
+                res.redirect('/secrets')
+            })
+        }
     })
-
 })
 
 // posting the login route
 app.post('/login', function (req, res) {
-    // finding the user in the database
-    User.findOne({
-        email: req.body.username
-    }, function (err, foundUser) {
+    // loging the user
+    req.login(new User({
+        username: req.body.username,
+        password: req.body.password
+    }), function (err) {
+        // checking the err
         if (err) {
-            // there was an error
+            // user not found
             console.log(err)
         } else {
-            // username was successfully found, checking for password
-            bcrypt.compare(req.body.password, foundUser.password, function (err, result) {
-                if (result) {
-                    // user was successfully verified
-                    res.render('secrets')
-                } else {
-                    // user was not found
-                    res.send("Your email or password is wrong")
-                }
+            // user found now authenticate
+            passport.authenticate('local')(req, res, function () {
+                // user was authenticated, redirecting to the secrets route
+                res.redirect('/secrets')
             })
         }
     })
+})
 
+// listning the login routes
+app.get('/logout', function (req, res) {
+    // loging out the  user
+    req.logout()
+    // redirect to the root route
+    res.redirect('/')
+})
+
+// spinning the server at port 3000
+app.listen(3000, function () {
+    console.log('Server is running at port 3000')
 })
