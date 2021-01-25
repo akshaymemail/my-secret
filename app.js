@@ -14,6 +14,8 @@ const bcrypt = require('bcrypt')
 const session = require('express-session')
 const passport = require('passport')
 const passportLocalMongoose = require('passport-local-mongoose')
+const GoogleStrategy = require('passport-google-oauth20').Strategy
+const findOrCreate = require('mongoose-findorcreate')
 
 //crating bcrypt salt rounds
 const bcryptSalt = 10
@@ -43,6 +45,19 @@ app.use(session({
 app.use(passport.initialize())
 app.use(passport.session())
 mongoose.set('useCreateIndex', true);
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 // creating the connection with mongodb
 mongoose.connect('mongodb://localhost:27017/userDB', {
     useNewUrlParser: true,
@@ -52,11 +67,16 @@ mongoose.connect('mongodb://localhost:27017/userDB', {
 // creating the schema
 const schema = new mongoose.Schema({
     email: String,
-    password: String
+    password: String,
+    googleId: String,
+    secrets : String
 })
 
-//creating the schema plugin
+//adding the mongoose schema plugin
 schema.plugin(passportLocalMongoose)
+
+// adding the findOrCreate plugin
+schema.plugin(findOrCreate)
 
 // creating the the model
 const User = mongoose.model('User', schema)
@@ -65,15 +85,28 @@ const User = mongoose.model('User', schema)
 passport.use(User.createStrategy())
 
 // creating passport to serialize and deserialize
-passport.serializeUser(User.serializeUser())
-passport.deserializeUser(User.deserializeUser())
-
-
+passport.serializeUser(function(user, done) {
+    done(null, user);
+  });
+  
+  passport.deserializeUser(function(user, done) {
+    done(null, user);
+  });
 
 // listening the home router
 app.get('/', function (req, res) {
     res.render('home')
 })
+
+// listening the auth/google route
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile'] }))
+
+app.get('/auth/google/secrets', 
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+});
 
 // listening the login route
 app.get('/login', function (req, res) {
@@ -90,11 +123,48 @@ app.get('/secrets', function (req, res) {
     // checking if the user is authenticated or not
     if (req.isAuthenticated()) {
         // user is authenticated
-        res.render('secrets')
+        User.find({secrets : {$ne : null}}, function (err, users) {
+            if(err) {
+                console.log(err)
+            }else{
+                res.render('secrets',{users : users})
+            }
+        }) 
     } else {
         // user is not authenticated
         res.redirect('/login')
     }
+})
+
+// listening the submit routes
+app.get('/submit', function (req, res) {
+    // checking if the user is authenticated or not
+    if (req.isAuthenticated()) {
+        // user is authenticated
+        res.render('submit')
+    } else {
+        // user is not authenticated
+        res.redirect('/login')
+    }
+})
+
+// posting the submit route
+app.post('/submit', function (req, res){
+
+    // submit the secret to the database of logged in user
+    User.findById(req.user._id, function (err, foundUser){
+        // checking the error
+        if(err) {
+            // there was an error
+            console.log(err)
+        }else{
+            // user found successfully
+            foundUser.secrets = req.body.secret
+            foundUser.save(function(){
+                res.redirect('/secrets')
+            })
+        }
+    })
 })
 
 // posting the register route
@@ -108,7 +178,7 @@ app.post('/register', function (req, res) {
             console.log(err)
             res.redirect('/register')
         } else {
-            // user was registered new authenticating
+            // user was registered now authenticating
             passport.authenticate('local')(req, res, function () {
                 // user was authenticated, redirecting the secrets route
                 res.redirect('/secrets')
